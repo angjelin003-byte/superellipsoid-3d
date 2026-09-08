@@ -15,6 +15,13 @@ import kotlin.math.pow
 import kotlin.math.sign
 import kotlin.math.sin
 
+enum class WireframeStyle(val label: String) {
+    POINTS("Points"),
+    GRID("Grid Mesh"),
+    LATITUDE("Latitude Rings"),
+    LONGITUDE("Longitude Rings")
+}
+
 data class Vector3(val x: Float, val y: Float, val z: Float)
 
 fun evaluateSuperellipsoid(
@@ -44,13 +51,18 @@ class SuperellipsoidView(context: Context) : View(context) {
 
     private var s1: Float = 0.87f
     private var s2: Float = 0.91f
-    private var drawMesh: Boolean = false
+    private var rotSpeedY: Float = 0.005f
+    private var bgHue: Float = 260f
 
-    private val etaSteps: Int = 60
-    private val omegaSteps: Int = 120
+    private var isPerspective: Boolean = true
+    private var wireframeStyleIndex: Int = 1
+
+    private val etaSteps: Int = 50
+    private val omegaSteps: Int = 100
 
     private var lastTouchX: Float = 0f
     private var lastTouchY: Float = 0f
+    private var activeSlider: Int = -1
 
     private val pointPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.parseColor("#E66EFF")
@@ -72,18 +84,37 @@ class SuperellipsoidView(context: Context) : View(context) {
 
     private val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.WHITE
-        textSize = 40f
+        textSize = 32f
     }
 
-    private val buttonBgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#DC2D1946")
+    private val panelBgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.parseColor("#E60D071A")
         style = Paint.Style.FILL
     }
 
-    private val buttonBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+    private val panelBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.parseColor("#C86EFF")
         strokeWidth = 3f
         style = Paint.Style.STROKE
+    }
+
+    private val sliderTrackPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.parseColor("#4A3B69")
+        strokeWidth = 8f
+        strokeCap = Paint.Cap.ROUND
+        style = Paint.Style.STROKE
+    }
+
+    private val sliderFillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.parseColor("#C86EFF")
+        strokeWidth = 8f
+        strokeCap = Paint.Cap.ROUND
+        style = Paint.Style.STROKE
+    }
+
+    private val sliderThumbPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.parseColor("#00FFC8")
+        style = Paint.Style.FILL
     }
 
     private val scaleDetector = ScaleGestureDetector(context, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
@@ -96,12 +127,14 @@ class SuperellipsoidView(context: Context) : View(context) {
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
-        canvas.drawColor(Color.parseColor("#08040F"))
+
+        val bgColor = Color.HSVToColor(floatArrayOf(bgHue, 0.65f, 0.08f))
+        canvas.drawColor(bgColor)
 
         val cx = width.toFloat() / 2.0f
-        val cy = height.toFloat() / 2.0f - 100.0f
+        val cy = height.toFloat() / 2.0f - 180.0f
 
-        rotY += 0.005f
+        rotY += rotSpeedY
 
         val cosX = cos(rotX)
         val sinX = sin(rotX)
@@ -117,37 +150,66 @@ class SuperellipsoidView(context: Context) : View(context) {
         val dEta = (etaMax - etaMin) / etaSteps.toFloat()
         val dOmega = (omegaMax - omegaMin) / omegaSteps.toFloat()
 
-        if (drawMesh) {
-            val path = Path()
-            for (i in 0 until etaSteps) {
-                val eta = etaMin + i.toFloat() * dEta
-                val etaNext = etaMin + (i + 1).toFloat() * dEta
-                for (j in 0..omegaSteps) {
-                    val omega = omegaMin + j.toFloat() * dOmega
-                    val p1 = project(evaluateSuperellipsoid(eta, omega, s1, s2, scaleFactor), cosX, sinX, cosY, sinY, cx, cy)
-                    val p2 = project(evaluateSuperellipsoid(etaNext, omega, s1, s2, scaleFactor), cosX, sinX, cosY, sinY, cx, cy)
+        when (WireframeStyle.values()[wireframeStyleIndex]) {
+            WireframeStyle.POINTS -> {
+                val points = FloatArray((etaSteps + 1) * (omegaSteps + 1) * 2)
+                var idx = 0
+                for (i in 0..etaSteps) {
+                    val eta = etaMin + i.toFloat() * dEta
+                    for (j in 0..omegaSteps) {
+                        val omega = omegaMin + j.toFloat() * dOmega
+                        val p = evaluateSuperellipsoid(eta, omega, s1, s2, scaleFactor)
+                        val projected = project(p, cosX, sinX, cosY, sinY, cx, cy)
+                        points[idx++] = projected[0]
+                        points[idx++] = projected[1]
+                    }
+                }
+                canvas.drawPoints(points, haloPaint)
+                canvas.drawPoints(points, pointPaint)
+            }
+            WireframeStyle.GRID -> {
+                val path = Path()
+                for (i in 0 until etaSteps) {
+                    val eta = etaMin + i.toFloat() * dEta
+                    val etaNext = etaMin + (i + 1).toFloat() * dEta
+                    for (j in 0..omegaSteps) {
+                        val omega = omegaMin + j.toFloat() * dOmega
+                        val p1 = project(evaluateSuperellipsoid(eta, omega, s1, s2, scaleFactor), cosX, sinX, cosY, sinY, cx, cy)
+                        val p2 = project(evaluateSuperellipsoid(etaNext, omega, s1, s2, scaleFactor), cosX, sinX, cosY, sinY, cx, cy)
 
-                    if (j == 0) path.moveTo(p1[0], p1[1])
-                    else path.lineTo(p1[0], p1[1])
-                    path.lineTo(p2[0], p2[1])
+                        if (j == 0) path.moveTo(p1[0], p1[1])
+                        else path.lineTo(p1[0], p1[1])
+                        path.lineTo(p2[0], p2[1])
+                    }
                 }
+                canvas.drawPath(path, meshPaint)
             }
-            canvas.drawPath(path, meshPaint)
-        } else {
-            val points = FloatArray((etaSteps + 1) * (omegaSteps + 1) * 2)
-            var idx = 0
-            for (i in 0..etaSteps) {
-                val eta = etaMin + i.toFloat() * dEta
+            WireframeStyle.LATITUDE -> {
+                val path = Path()
+                for (i in 0..etaSteps) {
+                    val eta = etaMin + i.toFloat() * dEta
+                    for (j in 0..omegaSteps) {
+                        val omega = omegaMin + j.toFloat() * dOmega
+                        val p = project(evaluateSuperellipsoid(eta, omega, s1, s2, scaleFactor), cosX, sinX, cosY, sinY, cx, cy)
+                        if (j == 0) path.moveTo(p[0], p[1])
+                        else path.lineTo(p[0], p[1])
+                    }
+                }
+                canvas.drawPath(path, meshPaint)
+            }
+            WireframeStyle.LONGITUDE -> {
+                val path = Path()
                 for (j in 0..omegaSteps) {
                     val omega = omegaMin + j.toFloat() * dOmega
-                    val p = evaluateSuperellipsoid(eta, omega, s1, s2, scaleFactor)
-                    val projected = project(p, cosX, sinX, cosY, sinY, cx, cy)
-                    points[idx++] = projected[0]
-                    points[idx++] = projected[1]
+                    for (i in 0..etaSteps) {
+                        val eta = etaMin + i.toFloat() * dEta
+                        val p = project(evaluateSuperellipsoid(eta, omega, s1, s2, scaleFactor), cosX, sinX, cosY, sinY, cx, cy)
+                        if (i == 0) path.moveTo(p[0], p[1])
+                        else path.lineTo(p[0], p[1])
+                    }
                 }
+                canvas.drawPath(path, meshPaint)
             }
-            canvas.drawPoints(points, haloPaint)
-            canvas.drawPoints(points, pointPaint)
         }
 
         drawHUD(canvas)
@@ -163,41 +225,74 @@ class SuperellipsoidView(context: Context) : View(context) {
         val y2 = y1 * cosX - z1 * sinX
         val z2 = y1 * sinX + z1 * cosX
 
-        val distance = 1000.0f
-        val fov = distance / (distance + z2)
-        return floatArrayOf(x2 * fov + cx, y2 * fov + cy)
+        return if (isPerspective) {
+            val distance = 1000.0f
+            val fov = distance / (distance + z2)
+            floatArrayOf(x2 * fov + cx, y2 * fov + cy)
+        } else {
+            floatArrayOf(x2 + cx, y2 + cy)
+        }
     }
 
     private fun drawHUD(canvas: Canvas) {
         val w = width.toFloat()
         val h = height.toFloat()
-        val uiY = h - 320.0f
+        val uiY = h - 500.0f
 
-        val rect = RectF(20.0f, uiY, w - 20.0f, h - 40.0f)
-        canvas.drawRoundRect(rect, 30.0f, 30.0f, buttonBgPaint)
-        canvas.drawRoundRect(rect, 30.0f, 30.0f, buttonBorderPaint)
+        val rect = RectF(16.0f, uiY, w - 16.0f, h - 20.0f)
+        canvas.drawRoundRect(rect, 24.0f, 24.0f, panelBgPaint)
+        canvas.drawRoundRect(rect, 24.0f, 24.0f, panelBorderPaint)
 
-        canvas.drawText(String.format("s1 = %.2f", s1), 50.0f, uiY + 70.0f, textPaint)
-        canvas.drawText(String.format("s2 = %.2f", s2), 50.0f, uiY + 150.0f, textPaint)
+        val trackWidth = w - 300.0f
+        val sliderX = 230.0f
 
-        drawBtn(canvas, w - 290.0f, uiY + 25.0f, 100.0f, 60.0f, "-")
-        drawBtn(canvas, w - 160.0f, uiY + 25.0f, 100.0f, 60.0f, "+")
+        drawSlider(canvas, "s1 Exponent", String.format("%.2f", s1), s1, 0.1f, 3.0f, sliderX, uiY + 50.0f, trackWidth)
+        drawSlider(canvas, "s2 Exponent", String.format("%.2f", s2), s2, 0.1f, 3.0f, sliderX, uiY + 130.0f, trackWidth)
 
-        drawBtn(canvas, w - 290.0f, uiY + 105.0f, 100.0f, 60.0f, "-")
-        drawBtn(canvas, w - 160.0f, uiY + 105.0f, 100.0f, 60.0f, "+")
+        val speedText = if (abs(rotSpeedY) < 0.001f) "0 (Paused)" else String.format("%.3f", rotSpeedY)
+        drawSlider(canvas, "Rot Speed", speedText, rotSpeedY, -0.05f, 0.05f, sliderX, uiY + 210.0f, trackWidth)
 
-        val btnW = (w - 140.0f) / 2.0f
-        drawBtn(canvas, 50.0f, uiY + 195.0f, btnW, 65.0f, if (drawMesh) "Points" else "Mesh")
-        drawBtn(canvas, w / 2.0f + 20.0f, uiY + 195.0f, btnW, 65.0f, "Reset")
+        drawSlider(canvas, "BG Hue", String.format("%.0f°", bgHue), bgHue, 0f, 360f, sliderX, uiY + 290.0f, trackWidth)
+
+        val btnY = uiY + 370.0f
+        val btnW = (w - 80.0f) / 3.0f
+
+        drawBtn(canvas, 32.0f, btnY, btnW, 75.0f, if (isPerspective) "Perspective" else "Isometric")
+        drawBtn(canvas, 48.0f + btnW, btnY, btnW, 75.0f, WireframeStyle.values()[wireframeStyleIndex].label)
+        drawBtn(canvas, 64.0f + btnW * 2, btnY, btnW, 75.0f, "Reset")
+    }
+
+    private fun drawSlider(
+        canvas: Canvas,
+        label: String,
+        valueStr: String,
+        value: Float,
+        min: Float,
+        max: Float,
+        x: Float,
+        y: Float,
+        width: Float
+    ) {
+        val prevAlign = textPaint.textAlign
+        textPaint.textAlign = Paint.Align.LEFT
+        canvas.drawText("$label: $valueStr", 40.0f, y + 8.0f, textPaint)
+        textPaint.textAlign = prevAlign
+
+        val progress = ((value - min) / (max - min)).coerceIn(0f, 1f)
+        val thumbX = x + progress * width
+
+        canvas.drawLine(x, y, x + width, y, sliderTrackPaint)
+        canvas.drawLine(x, y, thumbX, y, sliderFillPaint)
+        canvas.drawCircle(thumbX, y, 18.0f, sliderThumbPaint)
     }
 
     private fun drawBtn(canvas: Canvas, x: Float, y: Float, w: Float, h: Float, label: String) {
         val rect = RectF(x, y, x + w, y + h)
-        canvas.drawRoundRect(rect, 15.0f, 15.0f, buttonBgPaint)
-        canvas.drawRoundRect(rect, 15.0f, 15.0f, buttonBorderPaint)
+        canvas.drawRoundRect(rect, 14.0f, 14.0f, panelBgPaint)
+        canvas.drawRoundRect(rect, 14.0f, 14.0f, panelBorderPaint)
         val prevAlign = textPaint.textAlign
         textPaint.textAlign = Paint.Align.CENTER
-        canvas.drawText(label, x + w / 2.0f, y + h / 2.0f + 12.0f, textPaint)
+        canvas.drawText(label, x + w / 2.0f, y + h / 2.0f + 10.0f, textPaint)
         textPaint.textAlign = prevAlign
     }
 
@@ -205,7 +300,9 @@ class SuperellipsoidView(context: Context) : View(context) {
         scaleDetector.onTouchEvent(event)
         val w = width.toFloat()
         val h = height.toFloat()
-        val uiY = h - 320.0f
+        val uiY = h - 500.0f
+        val trackWidth = w - 300.0f
+        val sliderX = 230.0f
 
         when (event.action) {
             MotionEvent.ACTION_DOWN -> {
@@ -213,25 +310,42 @@ class SuperellipsoidView(context: Context) : View(context) {
                 lastTouchY = event.y
 
                 if (event.y >= uiY) {
-                    if (isTouchInside(event.x, event.y, w - 290.0f, uiY + 25.0f, 100.0f, 60.0f)) s1 = (s1 - 0.05f).coerceAtLeast(0.05f)
-                    if (isTouchInside(event.x, event.y, w - 160.0f, uiY + 25.0f, 100.0f, 60.0f)) s1 = (s1 + 0.05f).coerceAtMost(3.0f)
+                    activeSlider = when {
+                        isTouchNearSlider(event.y, uiY + 50.0f) -> 0
+                        isTouchNearSlider(event.y, uiY + 130.0f) -> 1
+                        isTouchNearSlider(event.y, uiY + 210.0f) -> 2
+                        isTouchNearSlider(event.y, uiY + 290.0f) -> 3
+                        else -> -1
+                    }
 
-                    if (isTouchInside(event.x, event.y, w - 290.0f, uiY + 105.0f, 100.0f, 60.0f)) s2 = (s2 - 0.05f).coerceAtLeast(0.05f)
-                    if (isTouchInside(event.x, event.y, w - 160.0f, uiY + 105.0f, 100.0f, 60.0f)) s2 = (s2 + 0.05f).coerceAtMost(3.0f)
+                    if (activeSlider != -1) {
+                        updateSliderValue(activeSlider, event.x, sliderX, trackWidth)
+                    } else {
+                        val btnY = uiY + 370.0f
+                        val btnW = (w - 80.0f) / 3.0f
 
-                    val btnW = (w - 140.0f) / 2.0f
-                    if (isTouchInside(event.x, event.y, 50.0f, uiY + 195.0f, btnW, 65.0f)) drawMesh = !drawMesh
-                    if (isTouchInside(event.x, event.y, w / 2.0f + 20.0f, uiY + 195.0f, btnW, 65.0f)) {
-                        s1 = 0.87f
-                        s2 = 0.91f
-                        scaleFactor = 300.0f
-                        rotX = 0.0f
-                        rotY = 0.0f
+                        if (isTouchInside(event.x, event.y, 32.0f, btnY, btnW, 75.0f)) {
+                            isPerspective = !isPerspective
+                        } else if (isTouchInside(event.x, event.y, 48.0f + btnW, btnY, btnW, 75.0f)) {
+                            wireframeStyleIndex = (wireframeStyleIndex + 1) % WireframeStyle.values().size
+                        } else if (isTouchInside(event.x, event.y, 64.0f + btnW * 2, btnY, btnW, 75.0f)) {
+                            s1 = 0.87f
+                            s2 = 0.91f
+                            rotSpeedY = 0.005f
+                            bgHue = 260f
+                            isPerspective = true
+                            wireframeStyleIndex = 1
+                            scaleFactor = 300.0f
+                            rotX = 0.0f
+                            rotY = 0.0f
+                        }
                     }
                 }
             }
             MotionEvent.ACTION_MOVE -> {
-                if (event.y < uiY && !scaleDetector.isInProgress && event.pointerCount == 1) {
+                if (activeSlider != -1) {
+                    updateSliderValue(activeSlider, event.x, sliderX, trackWidth)
+                } else if (event.y < uiY && !scaleDetector.isInProgress && event.pointerCount == 1) {
                     val dx = event.x - lastTouchX
                     val dy = event.y - lastTouchY
                     rotY += dx * 0.008f
@@ -240,9 +354,29 @@ class SuperellipsoidView(context: Context) : View(context) {
                     lastTouchY = event.y
                 }
             }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                activeSlider = -1
+            }
         }
         invalidate()
         return true
+    }
+
+    private fun isTouchNearSlider(touchY: Float, sliderCenterY: Float): Boolean {
+        return abs(touchY - sliderCenterY) <= 35.0f
+    }
+
+    private fun updateSliderValue(sliderIndex: Int, touchX: Float, sliderX: Float, trackWidth: Float) {
+        val fraction = ((touchX - sliderX) / trackWidth).coerceIn(0f, 1f)
+        when (sliderIndex) {
+            0 -> s1 = 0.1f + fraction * (3.0f - 0.1f)
+            1 -> s2 = 0.1f + fraction * (3.0f - 0.1f)
+            2 -> {
+                val rawVal = -0.05f + fraction * 0.10f
+                rotSpeedY = if (abs(rawVal) < 0.002f) 0.0f else rawVal
+            }
+            3 -> bgHue = fraction * 360.0f
+        }
     }
 
     private fun isTouchInside(tx: Float, ty: Float, x: Float, y: Float, w: Float, h: Float): Boolean {
