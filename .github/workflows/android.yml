@@ -1,4 +1,4 @@
-name: Build Android APK
+name: Build Android APK & Run Experiments
 
 on:
   push:
@@ -9,7 +9,7 @@ permissions:
   contents: write
 
 jobs:
-  build-android:
+  build-and-experiment:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Repository
@@ -26,22 +26,24 @@ jobs:
         with:
           gradle-version: '8.5'
 
-      - name: Generate and Commit Gradle Wrapper
+      - name: Execute Experimental Kotlin Scripts
         run: |
-          gradle wrapper --gradle-version 8.5
-          chmod +x gradlew
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git add gradlew gradlew.bat gradle/wrapper/
-          git commit -m "Generate Gradle Wrapper [skip ci]" || echo "No wrapper updates"
-          git push || echo "Push skipped"
+          sudo apt-get update && sudo apt-get install -y kotlin
+          kotlinc -script experiments/parameter_bench.kts
+          kotlinc -script experiments/mesh_generator.kts
 
       - name: Build Debug APK
-        run: ./gradlew assembleDebug
+        run: gradle assembleDebug
 
       - name: Upload Android APK Artifact
         uses: actions/upload-artifact@v4
         with:
           name: app-debug
           path: app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Upload Generated Mesh Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: experimental-mesh-obj
+          path: superellipsoid_mesh.obj
           
