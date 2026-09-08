@@ -5,27 +5,52 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Path
+import android.graphics.RectF
 import android.view.MotionEvent
 import android.view.ScaleGestureDetector
 import android.view.View
+import kotlin.math.abs
 import kotlin.math.cos
+import kotlin.math.pow
+import kotlin.math.sign
 import kotlin.math.sin
+
+data class Vector3(val x: Float, val y: Float, val z: Float)
+
+fun evaluateSuperellipsoid(
+    eta: Float,
+    omega: Float,
+    s1: Float,
+    s2: Float,
+    scale: Float
+): Vector3 {
+    val cosEta = cos(eta)
+    val sinEta = sin(eta)
+    val cosOmega = cos(omega)
+    val sinOmega = sin(omega)
+
+    val x = sign(cosEta * cosOmega) * abs(cosEta).pow(s1) * abs(cosOmega).pow(s2)
+    val y = sign(cosEta * sinOmega) * abs(cosEta).pow(s1) * abs(sinOmega).pow(s2)
+    val z = sign(sinEta) * abs(sinEta).pow(s1)
+
+    return Vector3(x * scale, y * scale, z * scale)
+}
 
 class SuperellipsoidView(context: Context) : View(context) {
 
-    private var rotX = 0f
-    private var rotY = 0f
-    private var scaleFactor = 300f
+    private var rotX: Float = 0f
+    private var rotY: Float = 0f
+    private var scaleFactor: Float = 300f
 
-    private var s1 = 0.87f
-    private var s2 = 0.91f
-    private var drawMesh = false
+    private var s1: Float = 0.87f
+    private var s2: Float = 0.91f
+    private var drawMesh: Boolean = false
 
-    private val etaSteps = 60
-    private val omegaSteps = 120
+    private val etaSteps: Int = 60
+    private val omegaSteps: Int = 120
 
-    private var lastTouchX = 0f
-    private var lastTouchY = 0f
+    private var lastTouchX: Float = 0f
+    private var lastTouchY: Float = 0f
 
     private val pointPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.parseColor("#E66EFF")
@@ -73,8 +98,8 @@ class SuperellipsoidView(context: Context) : View(context) {
         super.onDraw(canvas)
         canvas.drawColor(Color.parseColor("#08040F"))
 
-        val cx = width / 2f
-        val cy = height / 2f - 100f
+        val cx = width.toFloat() / 2.0f
+        val cy = height.toFloat() / 2.0f - 100.0f
 
         rotY += 0.005f
 
@@ -83,21 +108,22 @@ class SuperellipsoidView(context: Context) : View(context) {
         val cosY = cos(rotY)
         val sinY = sin(rotY)
 
-        val etaMin = -Math.PI.toFloat() / 2f
-        val etaMax = Math.PI.toFloat() / 2f
-        val omegaMin = -Math.PI.toFloat()
-        val omegaMax = Math.PI.toFloat()
+        val piFloat = Math.PI.toFloat()
+        val etaMin = -piFloat / 2.0f
+        val etaMax = piFloat / 2.0f
+        val omegaMin = -piFloat
+        val omegaMax = piFloat
 
-        val dEta = (etaMax - etaMin) / etaSteps
-        val dOmega = (omegaMax - omegaMin) / omegaSteps
+        val dEta = (etaMax - etaMin) / etaSteps.toFloat()
+        val dOmega = (omegaMax - omegaMin) / omegaSteps.toFloat()
 
         if (drawMesh) {
             val path = Path()
             for (i in 0 until etaSteps) {
-                val eta = etaMin + i * dEta
-                val etaNext = etaMin + (i + 1) * dEta
+                val eta = etaMin + i.toFloat() * dEta
+                val etaNext = etaMin + (i + 1).toFloat() * dEta
                 for (j in 0..omegaSteps) {
-                    val omega = omegaMin + j * dOmega
+                    val omega = omegaMin + j.toFloat() * dOmega
                     val p1 = project(evaluateSuperellipsoid(eta, omega, s1, s2, scaleFactor), cosX, sinX, cosY, sinY, cx, cy)
                     val p2 = project(evaluateSuperellipsoid(etaNext, omega, s1, s2, scaleFactor), cosX, sinX, cosY, sinY, cx, cy)
 
@@ -111,9 +137,9 @@ class SuperellipsoidView(context: Context) : View(context) {
             val points = FloatArray((etaSteps + 1) * (omegaSteps + 1) * 2)
             var idx = 0
             for (i in 0..etaSteps) {
-                val eta = etaMin + i * dEta
+                val eta = etaMin + i.toFloat() * dEta
                 for (j in 0..omegaSteps) {
-                    val omega = omegaMin + j * dOmega
+                    val omega = omegaMin + j.toFloat() * dOmega
                     val p = evaluateSuperellipsoid(eta, omega, s1, s2, scaleFactor)
                     val projected = project(p, cosX, sinX, cosY, sinY, cx, cy)
                     points[idx++] = projected[0]
@@ -137,42 +163,49 @@ class SuperellipsoidView(context: Context) : View(context) {
         val y2 = y1 * cosX - z1 * sinX
         val z2 = y1 * sinX + z1 * cosX
 
-        val distance = 1000f
+        val distance = 1000.0f
         val fov = distance / (distance + z2)
         return floatArrayOf(x2 * fov + cx, y2 * fov + cy)
     }
 
     private fun drawHUD(canvas: Canvas) {
-        val uiY = height - 320f
-        canvas.drawRoundRect(20f, uiY, width - 20f, height - 40f, 30f, 30f, buttonBgPaint)
-        canvas.drawRoundRect(20f, uiY, width - 20f, height - 40f, 30f, 30f, buttonBorderPaint)
+        val w = width.toFloat()
+        val h = height.toFloat()
+        val uiY = h - 320.0f
 
-        canvas.drawText(String.format("s1 = %.2f", s1), 50f, uiY + 70f, textPaint)
-        canvas.drawText(String.format("s2 = %.2f", s2), 50f, uiY + 150f, textPaint)
+        val rect = RectF(20.0f, uiY, w - 20.0f, h - 40.0f)
+        canvas.drawRoundRect(rect, 30.0f, 30.0f, buttonBgPaint)
+        canvas.drawRoundRect(rect, 30.0f, 30.0f, buttonBorderPaint)
 
-        drawBtn(canvas, width - 290f, uiY + 25f, 100f, 60f, "-")
-        drawBtn(canvas, width - 160f, uiY + 25f, 100f, 60f, "+")
+        canvas.drawText(String.format("s1 = %.2f", s1), 50.0f, uiY + 70.0f, textPaint)
+        canvas.drawText(String.format("s2 = %.2f", s2), 50.0f, uiY + 150.0f, textPaint)
 
-        drawBtn(canvas, width - 290f, uiY + 105f, 100f, 60f, "-")
-        drawBtn(canvas, width - 160f, uiY + 105f, 100f, 60f, "+")
+        drawBtn(canvas, w - 290.0f, uiY + 25.0f, 100.0f, 60.0f, "-")
+        drawBtn(canvas, w - 160.0f, uiY + 25.0f, 100.0f, 60.0f, "+")
 
-        val btnW = (width - 140f) / 2f
-        drawBtn(canvas, 50f, uiY + 195f, btnW, 65f, if (drawMesh) "Points" else "Mesh")
-        drawBtn(canvas, width / 2f + 20f, uiY + 195f, btnW, 65f, "Reset")
+        drawBtn(canvas, w - 290.0f, uiY + 105.0f, 100.0f, 60.0f, "-")
+        drawBtn(canvas, w - 160.0f, uiY + 105.0f, 100.0f, 60.0f, "+")
+
+        val btnW = (w - 140.0f) / 2.0f
+        drawBtn(canvas, 50.0f, uiY + 195.0f, btnW, 65.0f, if (drawMesh) "Points" else "Mesh")
+        drawBtn(canvas, w / 2.0f + 20.0f, uiY + 195.0f, btnW, 65.0f, "Reset")
     }
 
     private fun drawBtn(canvas: Canvas, x: Float, y: Float, w: Float, h: Float, label: String) {
-        canvas.drawRoundRect(x, y, x + w, y + h, 15f, 15f, buttonBgPaint)
-        canvas.drawRoundRect(x, y, x + w, y + h, 15f, 15f, buttonBorderPaint)
+        val rect = RectF(x, y, x + w, y + h)
+        canvas.drawRoundRect(rect, 15.0f, 15.0f, buttonBgPaint)
+        canvas.drawRoundRect(rect, 15.0f, 15.0f, buttonBorderPaint)
         val prevAlign = textPaint.textAlign
         textPaint.textAlign = Paint.Align.CENTER
-        canvas.drawText(label, x + w / 2f, y + h / 2f + 12f, textPaint)
+        canvas.drawText(label, x + w / 2.0f, y + h / 2.0f + 12.0f, textPaint)
         textPaint.textAlign = prevAlign
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
         scaleDetector.onTouchEvent(event)
-        val uiY = height - 320f
+        val w = width.toFloat()
+        val h = height.toFloat()
+        val uiY = h - 320.0f
 
         when (event.action) {
             MotionEvent.ACTION_DOWN -> {
@@ -180,20 +213,20 @@ class SuperellipsoidView(context: Context) : View(context) {
                 lastTouchY = event.y
 
                 if (event.y >= uiY) {
-                    if (isTouchInside(event.x, event.y, width - 290f, uiY + 25f, 100f, 60f)) s1 = (s1 - 0.05f).coerceAtLeast(0.05f)
-                    if (isTouchInside(event.x, event.y, width - 160f, uiY + 25f, 100f, 60f)) s1 = (s1 + 0.05f).coerceAtMost(3.0f)
+                    if (isTouchInside(event.x, event.y, w - 290.0f, uiY + 25.0f, 100.0f, 60.0f)) s1 = (s1 - 0.05f).coerceAtLeast(0.05f)
+                    if (isTouchInside(event.x, event.y, w - 160.0f, uiY + 25.0f, 100.0f, 60.0f)) s1 = (s1 + 0.05f).coerceAtMost(3.0f)
 
-                    if (isTouchInside(event.x, event.y, width - 290f, uiY + 105f, 100f, 60f)) s2 = (s2 - 0.05f).coerceAtLeast(0.05f)
-                    if (isTouchInside(event.x, event.y, width - 160f, uiY + 105f, 100f, 60f)) s2 = (s2 + 0.05f).coerceAtMost(3.0f)
+                    if (isTouchInside(event.x, event.y, w - 290.0f, uiY + 105.0f, 100.0f, 60.0f)) s2 = (s2 - 0.05f).coerceAtLeast(0.05f)
+                    if (isTouchInside(event.x, event.y, w - 160.0f, uiY + 105.0f, 100.0f, 60.0f)) s2 = (s2 + 0.05f).coerceAtMost(3.0f)
 
-                    val btnW = (width - 140f) / 2f
-                    if (isTouchInside(event.x, event.y, 50f, uiY + 195f, btnW, 65f)) drawMesh = !drawMesh
-                    if (isTouchInside(event.x, event.y, width / 2f + 20f, uiY + 195f, btnW, 65f)) {
+                    val btnW = (w - 140.0f) / 2.0f
+                    if (isTouchInside(event.x, event.y, 50.0f, uiY + 195.0f, btnW, 65.0f)) drawMesh = !drawMesh
+                    if (isTouchInside(event.x, event.y, w / 2.0f + 20.0f, uiY + 195.0f, btnW, 65.0f)) {
                         s1 = 0.87f
                         s2 = 0.91f
-                        scaleFactor = 300f
-                        rotX = 0f
-                        rotY = 0f
+                        scaleFactor = 300.0f
+                        rotX = 0.0f
+                        rotY = 0.0f
                     }
                 }
             }
