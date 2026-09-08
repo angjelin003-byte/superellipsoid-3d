@@ -8,16 +8,6 @@ import kotlin.math.sin
 
 data class Vector3(val x: Float, val y: Float, val z: Float)
 
-/**
- * Calculates a point on a 3D Superellipsoid surface.
- *
- * Formula:
- * r(η, ω) = [
- *   sgn(cos η cos ω) * |cos η|^s1 * |cos ω|^s2,
- *   sgn(cos η sin ω) * |cos η|^s1 * |sin ω|^s2,
- *   sgn(sin η)       * |sin η|^s1
- * ]
- */
 fun evaluateSuperellipsoid(
     eta: Float,
     omega: Float,
